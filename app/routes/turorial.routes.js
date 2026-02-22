@@ -1,28 +1,32 @@
-module.exports = app => {
-  const tutorials = require("../controllers/tutorial.controller.js");
+const router = require("express").Router();
 
-  var router = require("express").Router();
+const tutorials = require("../controllers/tutorial.controller.js");
+const asyncHandler = require("../middleware/asyncHandler");
+const validateTutorialListQuery = require("../middleware/validateListQuery");
+const {
+  validateCreateTutorial,
+  validateUpdateTutorial
+} = require("../middleware/validateTutorial");
 
-  // Create a new Tutorial
-  router.post("/", tutorials.create);
+// Create a new Tutorial
+router.post("/", validateCreateTutorial, asyncHandler(tutorials.create));
 
-  // Retrieve all Tutorials
-  router.get("/", tutorials.findAll);
+// Retrieve all Tutorials (filtering, sorting, pagination)
+router.get("/", validateTutorialListQuery, asyncHandler(tutorials.findAll));
 
-  // Retrieve all published Tutorials
-  router.get("/published", tutorials.findAllPublished);
+// Retrieve all published Tutorials (filtering, sorting, pagination)
+router.get("/published", validateTutorialListQuery, asyncHandler(tutorials.findAllPublished));
 
-  // Retrieve a single Tutorial with id
-  router.get("/:id", tutorials.findOne);
+// Retrieve a single Tutorial with id
+router.get("/:id", asyncHandler(tutorials.findOne));
 
-  // Update a Tutorial with id
-  router.put("/:id", tutorials.update);
+// Update a Tutorial with id
+router.put("/:id", validateUpdateTutorial, asyncHandler(tutorials.update));
 
-  // Delete a Tutorial with id
-  router.delete("/:id", tutorials.delete);
+// Delete a Tutorial with id
+router.delete("/:id", asyncHandler(tutorials.delete));
 
-  // Create a new Tutorial
-  router.delete("/", tutorials.deleteAll);
+// Delete all Tutorials
+router.delete("/", asyncHandler(tutorials.deleteAll));
 
-  app.use("/api/tutorials", router);
-};
+module.exports = router;

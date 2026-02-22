@@ -1,143 +1,119 @@
 const db = require("../models");
 const Tutorial = db.tutorials;
 
-// Create and Save a new Tutorial
-exports.create = (req, res) => {
-  // Validate request
-  if (!req.body.title) {
-    res.status(400).send({ message: "Content can not be empty!" });
-    return;
-  }
+const ApiError = require("../utils/ApiError");
 
-  // Create a Tutorial
+async function listTutorials({ filter, sort, page, pageSize, sortField, dir }, res) {
+  const skip = (page - 1) * pageSize;
+
+  const [results, total] = await Promise.all([
+    Tutorial.find(filter).sort(sort).skip(skip).limit(pageSize),
+    Tutorial.countDocuments(filter)
+  ]);
+
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+
+  res.send({
+    total,
+    page,
+    pageSize,
+    totalPages,
+    hasNextPage: page < totalPages,
+    sort: { field: sortField, dir },
+    results
+  });
+}
+
+// Create and Save a new Tutorial
+exports.create = async (req, res) => {
+  const body = req.validatedBody || {};
+
   const tutorial = new Tutorial({
-    title: req.body.title,
-    description: req.body.description,
-    published: req.body.published ? req.body.published : false
+    title: body.title,
+    description: body.description,
+    published: body.published !== undefined ? body.published : false
   });
 
-  // Save Tutorial in the database
-  tutorial
-    .save(tutorial)
-    .then(data => {
-      res.send(data);
-    })
-    .catch(err => {
-      res.status(500).send({
-        message:
-          err.message || "Some error occurred while creating the Tutorial."
-      });
-    });
+  const data = await tutorial.save();
+  res.status(201).send(data);
 };
 
-// Retrieve all Tutorials from the database.
-exports.findAll = (req, res) => {
-  const title = req.query.title;
-  var condition = title ? { title: { $regex: new RegExp(title), $options: "i" } } : {};
+// Retrieve Tutorials from the database (filtering, sorting, pagination)
+exports.findAll = async (req, res) => {
+  const opts = req.listOptions || {
+    page: 1,
+    pageSize: 20,
+    sortField: "createdAt",
+    dir: "desc",
+    filter: {},
+    sort: { createdAt: -1 }
+  };
 
-  Tutorial.find(condition)
-    .then(data => {
-      res.send(data);
-    })
-    .catch(err => {
-      res.status(500).send({
-        message:
-          err.message || "Some error occurred while retrieving tutorials."
-      });
-    });
+  await listTutorials(opts, res);
 };
 
 // Find a single Tutorial with an id
-exports.findOne = (req, res) => {
+exports.findOne = async (req, res) => {
   const id = req.params.id;
 
-  Tutorial.findById(id)
-    .then(data => {
-      if (!data)
-        res.status(404).send({ message: "Not found Tutorial with id " + id });
-      else res.send(data);
-    })
-    .catch(err => {
-      res
-        .status(500)
-        .send({ message: "Error retrieving Tutorial with id=" + id });
-    });
+  const data = await Tutorial.findById(id);
+  if (!data) {
+    throw new ApiError(404, `Not found Tutorial with id ${id}`);
+  }
+
+  res.send(data);
 };
 
 // Update a Tutorial by the id in the request
-exports.update = (req, res) => {
-  if (!req.body) {
-    return res.status(400).send({
-      message: "Data to update can not be empty!"
-    });
+exports.update = async (req, res) => {
+  const id = req.params.id;
+  const updateBody = req.validatedBody || {};
+
+  const data = await Tutorial.findByIdAndUpdate(id, updateBody, {
+  new: true,
+  runValidators: true,
+  context: "query"
+});
+  if (!data) {
+    throw new ApiError(404, `Cannot update Tutorial with id=${id}. Tutorial was not found.`);
   }
 
-  const id = req.params.id;
-
-  Tutorial.findByIdAndUpdate(id, req.body, { useFindAndModify: false })
-    .then(data => {
-      if (!data) {
-        res.status(404).send({
-          message: `Cannot update Tutorial with id=${id}. Maybe Tutorial was not found!`
-        });
-      } else res.send({ message: "Tutorial was updated successfully." });
-    })
-    .catch(err => {
-      res.status(500).send({
-        message: "Error updating Tutorial with id=" + id
-      });
-    });
+  res.send({ message: "Tutorial was updated successfully.", tutorial: data });
 };
 
 // Delete a Tutorial with the specified id in the request
-exports.delete = (req, res) => {
+exports.delete = async (req, res) => {
   const id = req.params.id;
 
-  Tutorial.findByIdAndRemove(id, { useFindAndModify: false })
-    .then(data => {
-      if (!data) {
-        res.status(404).send({
-          message: `Cannot delete Tutorial with id=${id}. Maybe Tutorial was not found!`
-        });
-      } else {
-        res.send({
-          message: "Tutorial was deleted successfully!"
-        });
-      }
-    })
-    .catch(err => {
-      res.status(500).send({
-        message: "Could not delete Tutorial with id=" + id
-      });
-    });
+  const data = await Tutorial.findByIdAndDelete(id);
+  if (!data) {
+    throw new ApiError(404, `Cannot delete Tutorial with id=${id}. Tutorial was not found.`);
+  }
+
+  res.send({ message: "Tutorial was deleted successfully!" });
 };
 
 // Delete all Tutorials from the database.
-exports.deleteAll = (req, res) => {
-  Tutorial.deleteMany({})
-    .then(data => {
-      res.send({
-        message: `${data.deletedCount} Tutorials were deleted successfully!`
-      });
-    })
-    .catch(err => {
-      res.status(500).send({
-        message:
-          err.message || "Some error occurred while removing all tutorials."
-      });
-    });
+exports.deleteAll = async (req, res) => {
+  const data = await Tutorial.deleteMany({});
+  res.send({ message: `${data.deletedCount} Tutorials were deleted successfully!` });
 };
 
-// Find all published Tutorials
-exports.findAllPublished = (req, res) => {
-  Tutorial.find({ published: true })
-    .then(data => {
-      res.send(data);
-    })
-    .catch(err => {
-      res.status(500).send({
-        message:
-          err.message || "Some error occurred while retrieving tutorials."
-      });
-    });
+// Find all published Tutorials (supports filtering, sorting, pagination)
+exports.findAllPublished = async (req, res) => {
+  const baseOpts = req.listOptions || {
+    page: 1,
+    pageSize: 20,
+    sortField: "createdAt",
+    dir: "desc",
+    filter: {},
+    sort: { createdAt: -1 }
+  };
+
+  const opts = {
+    ...baseOpts,
+    filter: { ...baseOpts.filter, published: true }
+  };
+
+  await listTutorials(opts, res);
 };
